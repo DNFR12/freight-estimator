@@ -1,119 +1,50 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
     <title>Freight Estimator</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 30px;
+        form {
+            margin-bottom: 20px;
         }
-        select, input, button {
-            padding: 10px;
-            margin: 10px 0;
-            width: 300px;
-        }
-        #map {
-            height: 500px;
-            margin-top: 20px;
+        label {
+            display: inline-block;
+            width: 150px;
         }
     </style>
 </head>
 <body>
     <h1>Freight Estimator</h1>
-
-    <form id="quoteForm" method="POST">
-        <label>Shipment Type:</label><br>
-        <select name="type" id="type" required>
-            <option value="">Select Shipment Type</option>
+    <form method="POST">
+        <label for="shipment_type">Shipment Type:</label>
+        <select name="shipment_type" required>
             {% for t in types %}
                 <option value="{{ t }}">{{ t }}</option>
             {% endfor %}
-        </select><br>
+        </select><br><br>
 
-        <label>Origin:</label><br>
-        <select name="origin" id="origin" required>
-            <option value="">Select Origin</option>
-        </select><br>
+        <label for="origin">Origin City:</label>
+        <select name="origin" required>
+            {% for o in origins %}
+                <option value="{{ o }}">{{ o }}</option>
+            {% endfor %}
+        </select><br><br>
 
-        <label>Destination:</label><br>
-        <select name="destination" id="destination" required>
-            <option value="">Select Destination</option>
-        </select><br>
+        <label for="destination">Destination City:</label>
+        <select name="destination" required>
+            {% for d in destinations %}
+                <option value="{{ d }}">{{ d }}</option>
+            {% endfor %}
+        </select><br><br>
 
-        <label>Or enter a new destination city:</label><br>
-        <input type="text" name="new_destination" placeholder="e.g., Denver, CO"><br>
-
-        <button type="submit">Get Estimate</button>
+        <button type="submit">Estimate</button>
     </form>
 
-    {% if result %}
-        <h2>Result:</h2>
-        <p><strong>Type:</strong> {{ result.type }}</p>
-        <p><strong>Origin:</strong> {{ result.origin }}</p>
-        <p><strong>Destination:</strong> {{ result.destination }}</p>
-        <p><strong>Total Cost:</strong> {{ result.total }}</p>
-        <div id="map"></div>
+    {% if quote %}
+        <h2>{{ quote }}</h2>
     {% endif %}
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        // === Dynamic Origin Filter ===
-        document.getElementById('type').addEventListener('change', function () {
-            fetch('/get_origins', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({type: this.value})
-            })
-            .then(response => response.json())
-            .then(data => {
-                const originSelect = document.getElementById('origin');
-                originSelect.innerHTML = '<option value="">Select Origin</option>';
-                data.origins.forEach(o => {
-                    originSelect.innerHTML += `<option value="${o}">${o}</option>`;
-                });
-                document.getElementById('destination').innerHTML = '<option value="">Select Destination</option>';
-            });
-        });
-
-        // === Dynamic Destination Filter ===
-        document.getElementById('origin').addEventListener('change', function () {
-            const type = document.getElementById('type').value;
-            fetch('/get_destinations', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({type: type, origin: this.value})
-            })
-            .then(response => response.json())
-            .then(data => {
-                const destinationSelect = document.getElementById('destination');
-                destinationSelect.innerHTML = '<option value="">Select Destination</option>';
-                data.destinations.forEach(d => {
-                    destinationSelect.innerHTML += `<option value="${d}">${d}</option>`;
-                });
-            });
-        });
-
-        // === Map Setup ===
-        {% if result and result.origin_lat and result.origin_lon and result.dest_lat and result.dest_lon %}
-        const map = L.map('map').setView([{{ result.origin_lat }}, {{ result.origin_lon }}], 5);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 18,
-            attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
-
-        const origin = [{{ result.origin_lat }}, {{ result.origin_lon }}];
-        const destination = [{{ result.dest_lat }}, {{ result.dest_lon }}];
-
-        L.marker(origin).addTo(map).bindPopup("Origin: {{ result.origin }}");
-        L.marker(destination).addTo(map).bindPopup("Destination: {{ result.destination }}");
-
-        L.polyline([origin, destination], {
-            color: '{{ result.line_color or "blue" }}',
-            weight: 5
-        }).addTo(map);
-        {% endif %}
-    </script>
+    {% if map_html %}
+        <div>{{ map_html|safe }}</div>
+    {% endif %}
 </body>
 </html>
