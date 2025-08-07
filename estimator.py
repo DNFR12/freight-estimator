@@ -1,69 +1,29 @@
-# estimator.py
-from geopy.distance import geodesic
-from utils import clean_and_combine_data
 import pandas as pd
+from utils import combine_all_datasets, estimate_freight
 
-file_paths = [
-    'data/otr_bulk.xlsx',
-    'data/iso_tank.xlsx',
-    'data/container_freight.xlsx',
-    'data/ltl_ftl.xlsx'
-]
+# File paths for each shipment type
+file_paths = {
+    'OTR Bulk': 'data/otr_bulk.xlsx',
+    'Iso Tank Bulk': 'data/iso_tank.xlsx',
+    'Containers Freight': 'data/container_freight.xlsx',
+    'LTL & FTL': 'data/ltl_ftl.xlsx'
+}
 
-DATA = clean_and_combine_data()
+# Combine all datasets into a single DataFrame with a column for Type
+DATA = combine_all_datasets(file_paths)
 
+# Extract options for dropdowns
 def get_types():
-    return sorted(DATA["Type"].dropna().unique())
+    return sorted(DATA['Type'].unique())
 
 def get_origins(shipment_type):
-    df = DATA[DATA["Type"] == shipment_type]
-    return sorted(df["Origin"].dropna().unique())
+    df = DATA[DATA['Type'] == shipment_type]
+    return sorted(df['ORIGIN'].unique())
 
 def get_destinations(shipment_type, origin):
-    df = DATA[(DATA["Type"] == shipment_type) & (DATA["Origin"] == origin)]
-    return sorted(df["Destination"].dropna().unique())
+    df = DATA[(DATA['Type'] == shipment_type) & (DATA['ORIGIN'] == origin)]
+    return sorted(df['DESTINATION'].unique())
 
-def calculate_quote(shipment_type, origin, destination, dest_lat=None, dest_lon=None):
-    df_match = DATA[(DATA["Type"] == shipment_type) &
-                    (DATA["Origin"] == origin) &
-                    (DATA["Destination"] == destination)]
-
-    if not df_match.empty:
-        return {
-            "status": "Quoted",
-            "total": round(df_match["Total"].mean(), 2)
-        }
-
-    try:
-        df_type = DATA[DATA["Type"] == shipment_type]
-        valid = df_type[(df_type["Linehaul"].notna()) &
-                        (df_type["Fuel"].notna()) &
-                        (df_type["Origin Latitude"].notna()) &
-                        (df_type["Destination Latitude"].notna())]
-
-        valid = valid.copy()
-        valid["Distance"] = valid.apply(lambda row: geodesic(
-            (row["Origin Latitude"], row["Origin Longitude"]),
-            (row["Destination Latitude"], row["Destination Longitude"])).miles, axis=1)
-
-        valid["$/mile"] = valid["Linehaul"] / valid["Distance"]
-        avg_rate = valid["$/mile"].mean()
-        avg_fuel = valid["Fuel"].mean()
-
-        origin_row = df_type[df_type["Origin"] == origin].iloc[0]
-        origin_coords = (origin_row["Origin Latitude"], origin_row["Origin Longitude"])
-        dest_coords = (float(dest_lat), float(dest_lon))
-
-        distance = geodesic(origin_coords, dest_coords).miles
-        linehaul = avg_rate * distance
-        total = linehaul * (1 + avg_fuel)
-
-        return {
-            "status": "Estimated",
-            "total": round(total, 2),
-            "distance": round(distance, 1)
-        }
-
-    except:
-        return {"status": "Cannot Calculate"}
-
+# Main quote calculator
+def calculate_quote(shipment_type, origin, destination, city_coords):
+    return estimate_freight(DATA, shipment_type, origin, destination, city_coords)
