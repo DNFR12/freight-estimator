@@ -1,10 +1,14 @@
+# app.py
 from flask import Flask, render_template, request
 from estimator import get_types, get_origins, get_destinations, calculate_quote
 from geopy.geocoders import Nominatim
 import os
+import pandas as pd
+from utils import clean_and_combine_data
 
 app = Flask(__name__)
 geolocator = Nominatim(user_agent="freight-estimator")
+DATA = clean_and_combine_data()
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -17,6 +21,8 @@ def index():
     dest_city = request.form.get("dest_city")
     dest_lat = request.form.get("dest_lat")
     dest_lon = request.form.get("dest_lon")
+
+    origin_row = None
 
     # Geocode destination city if entered
     if dest_city and not dest_lat and not dest_lon:
@@ -31,6 +37,11 @@ def index():
     origins = get_origins(selected_type) if selected_type else []
     destinations = get_destinations(selected_type, selected_origin) if selected_origin else []
 
+    if selected_type and selected_origin:
+        df = DATA[(DATA["Type"] == selected_type) & (DATA["Origin"] == selected_origin)]
+        if not df.empty:
+            origin_row = df.iloc[0].to_dict()
+
     if request.method == "POST":
         result = calculate_quote(selected_type, selected_origin, selected_dest, dest_lat, dest_lon)
 
@@ -44,7 +55,8 @@ def index():
                            dest_city=dest_city,
                            dest_lat=dest_lat,
                            dest_lon=dest_lon,
-                           result=result)
+                           result=result,
+                           origin_row=origin_row)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
