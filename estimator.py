@@ -1,57 +1,41 @@
-from geopy.distance import geodesic
+import pandas as pd
+from utils import combine_all_datasets, compute_distance, find_matching_routes, calculate_estimate
 
-def estimate_freight(df, shipment_type, origin, destination, city_coords):
-    filtered = df[(df['Type'] == shipment_type) &
-                  (df['ORIGIN'] == origin) &
-                  (df['DESTINATION'] == destination)]
+# File paths
+file_paths = {
+    'OTR Bulk': 'data/otr_bulk.xlsx',
+    'Iso Tank Bulk': 'data/iso_tank.xlsx',
+    'Containers Freight': 'data/container_freight.xlsx',
+    'LTL & FTL': 'data/ltl_ftl.xlsx'
+}
 
-    if not filtered.empty:
-        avg_total = filtered['TOTAL'].mean()
-        avg_fuel = filtered['FUEL'].mean() if 'FUEL' in filtered.columns else 0
-        avg_miles = filtered['Miles'].mean() if 'Miles' in filtered.columns else None
-        return round(avg_total, 2), round(avg_fuel, 2), round(avg_miles, 2) if avg_miles else None
+# Preload data
+DATA = combine_all_datasets(file_paths)
 
-    # If new destination, fallback to distance estimate
-    if city_coords is None:
-        return "Cannot calculate", "N/A", "N/A"
+def get_types():
+    return sorted(DATA['Type'].unique())
 
-    origin_coords = df[
-        (df['Type'] == shipment_type) & (df['ORIGIN'] == origin)
-    ][['Origin Latitude', 'Origin Longitude']].dropna().iloc[0]
+def get_origins(shipment_type):
+    return sorted(DATA[DATA['Type'] == shipment_type]['ORIGIN'].unique())
 
-    dest_coords = city_coords
-    distance_miles = geodesic(
-        (origin_coords['Origin Latitude'], origin_coords['Origin Longitude']),
-        (dest_coords[0], dest_coords[1])
-    ).miles
+def get_destinations(shipment_type, origin):
+    df = DATA[(DATA['Type'] == shipment_type) & (DATA['ORIGIN'] == origin)]
+    return sorted(df['DESTINATION'].unique())
 
-    # Fallback logic: use $/mile and fuel % averages
-    type_df = df[df['Type'] == shipment_type].dropna(subset=['TOTAL'])
-    if type_df.empty:
-        return "Cannot calculate", "N/A", f"{distance_miles:.0f} mi"
+def calculate_quote(shipment_type, origin, destination, dest_coords):
+    df = DATA[(DATA['Type'] == shipment_type) & (DATA['ORIGIN'] == origin)]
 
-    type_df = type_df.assign(
-        LinehaulOnly=type_df['TOTAL'] - type_df.get('FUEL', 0),
-        Miles=type_df.apply(
-            lambda row: geodesic(
-                (row['Origin Latitude'], row['Origin Longitude']),
-                (row['Destination Latitude'], row['Destination Longitude'])
-            ).miles,
-            axis=1
-        )
-    )
+    if dest_coords:
+        # New destination
+        origin_row = df.iloc[0]
+        origin_coords = (origin_row['Origin Latitude'], origin_row['Origin Longitude'])
+        miles = compute_distance(origin_coords, dest_coords, shipment_type)
+        result = calculate_estimate(df, miles)
+        result['note'] = "Estimated using distance to new city"
+    else:
+        # Use actual quote
+        matched = df[df['DESTINATION'] == destination]
+        result = find_matching_routes(matched)
+        result['note'] = "Average of known quotes" if not matched.empty else "No direct match, estimation unavailable"
 
-    type_df = type_df[type_df['Miles'] > 0]
-
-    type_df = type_df.assign(
-        RatePerMile=type_df['LinehaulOnly'] / type_df['Miles']
-    )
-
-    avg_rate_per_mile = type_df['RatePerMile'].mean()
-    avg_fuel_pct = (type_df['FUEL'] / type_df['LinehaulOnly']).mean() if 'FUEL' in type_df.columns else 0
-
-    est_linehaul = avg_rate_per_mile * distance_miles
-    est_fuel = est_linehaul * avg_fuel_pct
-    total = est_linehaul + est_fuel
-
-    return round(total, 2), round(est_fuel, 2), f"{distance_miles:.0f} mi"
+    return result
