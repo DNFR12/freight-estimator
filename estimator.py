@@ -3,7 +3,7 @@ from utils import combine_all_datasets, estimate_freight
 # Define paths to your quote files
 file_paths = {
     'OTR Bulk': 'data/otr_bulk.xlsx',
-    'Iso Tank Bulk': 'data/isotank_bulk.xlsx',
+    'Iso Tank Bulk': 'data/iso_tank_bulk.xlsx',
     'Containers Freight': 'data/containers_freight.xlsx',
     'LTL & FTL': 'data/ltl_ftl.xlsx',
 }
