@@ -3,6 +3,13 @@ from geopy.distance import geodesic
 from utils import clean_and_combine_data
 import pandas as pd
 
+file_paths = [
+    'data/otr_bulk.xlsx',
+    'data/iso_tank.xlsx',
+    'data/container_freight.xlsx',
+    'data/ltl_ftl.xlsx'
+]
+
 DATA = clean_and_combine_data()
 
 def get_types():
