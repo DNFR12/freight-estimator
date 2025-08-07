@@ -19,5 +19,41 @@
         </select>
 
         <label>Origin:</label>
-        <select name="origin" onchange="this.form.subm
+        <select name="origin" onchange="this.form.submit()">
+            <option value="">-- Select --</option>
+            {% for o in origins %}
+                <option value="{{ o }}" {% if o == selected_origin %}selected{% endif %}>{{ o }}</option>
+            {% endfor %}
+        </select>
 
+        <label>Destination:</label>
+        <select name="destination">
+            <option value="">-- Select --</option>
+            {% for d in destinations %}
+                <option value="{{ d }}" {% if d == selected_dest %}selected{% endif %}>{{ d }}</option>
+            {% endfor %}
+        </select>
+
+        <label>New Destination Latitude:</label>
+        <input type="text" name="dest_lat" value="{{ dest_lat or '' }}">
+
+        <label>New Destination Longitude:</label>
+        <input type="text" name="dest_lon" value="{{ dest_lon or '' }}">
+
+        <button type="submit">Estimate</button>
+    </form>
+
+    {% if result %}
+        <div class="result">
+            <h2>{{ result.status }}</h2>
+            {% if result.total %}
+                <p><strong>Total:</strong> ${{ result.total }}</p>
+            {% endif %}
+            {% if result.distance %}
+                <p><strong>Distance:</strong> {{ result.distance }} miles</p>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+</body>
+</html>
