@@ -1,1 +1,23 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Freight Estimator</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h1>Freight Estimator</h1>
+    <form method="post">
+        <label>Type:</label>
+        <select name="type" onchange="this.form.submit()">
+            <option value="">-- Select --</option>
+            {% for t in types %}
+                <option value="{{ t }}" {% if t == selected_type %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Origin:</label>
+        <select name="origin" onchange="this.form.subm
 
