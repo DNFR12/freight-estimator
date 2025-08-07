@@ -8,7 +8,7 @@ from utils import (
 # Mapping of shipment types to filenames
 file_paths = {
     "OTR Bulk": "data/otr_bulk.xlsx",
-    "Iso tank Bulk": "data/isotank_bulk.xlsx",
+    "Iso tank Bulk": "data/iso_tank_bulk.xlsx",
     "Containers Freight": "data/containers_freight.xlsx",
     "LTL & FTL": "data/ltl_ftl.xlsx"
 }
