@@ -1,73 +1,46 @@
-from utils import (
-    combine_all_datasets,
-    estimate_freight,
-    get_coordinates,
-    calculate_distance,
-)
+from utils import combine_all_datasets, estimate_freight
 
-# Mapping of shipment types to filenames
+# Define paths to your quote files
 file_paths = {
-    "OTR Bulk": "data/otr_bulk.xlsx",
-    "Iso tank Bulk": "data/iso_tank_bulk.xlsx",
-    "Containers Freight": "data/containers_freight.xlsx",
-    "LTL & FTL": "data/ltl_ftl.xlsx"
+    'OTR Bulk': 'data/otr_bulk.xlsx',
+    'Iso Tank Bulk': 'data/isotank_bulk.xlsx',
+    'Containers Freight': 'data/containers_freight.xlsx',
+    'LTL & FTL': 'data/ltl_ftl.xlsx',
 }
 
-# Load and clean all data once at startup
+# Combine and clean all quote datasets
 DATA = combine_all_datasets(file_paths)
 
 def get_types():
-    return list(DATA.keys())
+    # ✅ Return the unique shipment types, not column headers
+    return sorted(DATA['TYPE'].dropna().unique().tolist())
 
 def get_origins(shipment_type):
-    df = DATA.get(shipment_type)
-    if df is not None:
-        return sorted(df['ORIGIN'].dropna().unique().tolist())
-    return []
+    df = DATA[DATA['TYPE'] == shipment_type]
+    return sorted(df['ORIGIN'].dropna().unique().tolist())
 
 def get_destinations(shipment_type, origin):
-    df = DATA.get(shipment_type)
-    if df is not None:
-        filtered = df[df['ORIGIN'] == origin]
-        return sorted(filtered['DESTINATION'].dropna().unique().tolist())
-    return []
+    df = DATA[(DATA['TYPE'] == shipment_type) & (DATA['ORIGIN'] == origin)]
+    return sorted(df['DESTINATION'].dropna().unique().tolist())
 
-def calculate_quote(shipment_type, origin, destination, distance):
-    df = DATA.get(shipment_type)
-    if df is None:
-        return "Can not calculate", False
+def calculate_quote(shipment_type, origin, destination, new_city_coords=None):
+    df = DATA[(DATA['TYPE'] == shipment_type)]
 
-    filtered = df[
-        (df['ORIGIN'] == origin) & (df['DESTINATION'] == destination)
-    ]
+    if origin not in df['ORIGIN'].values:
+        return "Origin not found."
 
-    if not filtered.empty:
-        total = filtered['TOTAL'].mean()
-        return f"${total:,.2f}", False
-    else:
-        est = estimate_freight(df, origin, distance)
-        return (f"${est:,.2f}", True) if est is not None else ("Can not calculate", False)
+    if destination in df['DESTINATION'].values:
+        # Known destination: return average total
+        lanes = df[(df['ORIGIN'] == origin) & (df['DESTINATION'] == destination)]
+        if not lanes.empty:
+            avg_total = lanes['TOTAL'].mean()
+            return f"${avg_total:,.2f}"
+        else:
+            return "Can not Calculate"
 
-def get_coordinates(shipment_type, origin, destination):
-    df = DATA.get(shipment_type)
-    if df is None:
-        raise ValueError("Invalid shipment type")
+    # Unknown destination: Estimate using $/mile + fuel logic
+    if new_city_coords is None:
+        return "Can not Calculate"
 
-    row = df[
-        (df['ORIGIN'] == origin) & (df['DESTINATION'] == destination)
-    ].head(1)
-
-    if not row.empty:
-        origin_coords = (row.iloc[0]['Origin Latitude'], row.iloc[0]['Origin Longitude'])
-        dest_coords = (row.iloc[0]['Destination Latitude'], row.iloc[0]['Destination Longitude'])
-        return origin_coords, dest_coords
-
-    # Fallback: just use first instance of ORIGIN
-    origin_row = df[df['ORIGIN'] == origin].head(1)
-    if not origin_row.empty:
-        origin_coords = (origin_row.iloc[0]['Origin Latitude'], origin_row.iloc[0]['Origin Longitude'])
-    else:
-        raise ValueError("Origin coordinates not found")
-
-    # Assume new destination has already been geocoded by client
-    raise ValueError("Destination coordinates must be handled externally")
+    estimate = estimate_freight(df, origin, new_city_coords)
+    return estimate
