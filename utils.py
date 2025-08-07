@@ -1,96 +1,70 @@
 import pandas as pd
-from geopy.distance import geodesic
+import folium
 
-def safe_float_conversion(series):
-    """Remove $, %, and invalid entries, then convert to float safely."""
-    return pd.to_numeric(series.replace(r'[\$,%,]', '', regex=True), errors='coerce')
+def clean_currency_column(df, column):
+    df[column] = df[column].replace(r'[\$,]', '', regex=True)
+    df[column] = df[column].replace('-', '0')
+    df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+    return df
 
 def combine_all_datasets(file_paths):
-    """Combine datasets from multiple shipment types into one unified DataFrame."""
-    all_dfs = []
-
-    for shipment_type, path in file_paths.items():
+    combined = pd.DataFrame()
+    for path in file_paths:
         df = pd.read_excel(path)
         df.columns = [col.strip() for col in df.columns]
-        df['Type'] = shipment_type
 
-        # Normalize origin and destination column names
-        if 'Origin' in df.columns:
-            df['ORIGIN'] = df['Origin']
-        if 'Designation' in df.columns:
-            df['DESTINATION'] = df['Designation']
-        if 'Destination' in df.columns and 'DESTINATION' not in df.columns:
-            df['DESTINATION'] = df['Destination']
+        for col in ["LINEHAUL", "TANK WASH", "OTHER", "Demurrage", "TOTAL"]:
+            if col in df.columns:
+                df = clean_currency_column(df, col)
 
-        if 'ORIGIN' not in df.columns:
-            df['ORIGIN'] = df.get('Origin', '')
+        if "FUEL" in df.columns:
+            df["FUEL_PCT"] = df["FUEL"].replace('%', '', regex=True).replace('-', '0')
+            df["FUEL_PCT"] = pd.to_numeric(df["FUEL_PCT"], errors="coerce").fillna(0.0) / 100
+        else:
+            df["FUEL_PCT"] = 0.0
 
-        # Latitude and Longitude conversions
-        df['Origin Latitude'] = pd.to_numeric(df.get('Origin Latitude', None), errors='coerce')
-        df['Origin Longitude'] = pd.to_numeric(df.get('Origin Longitude', None), errors='coerce')
-        df['Destination Latitude'] = pd.to_numeric(df.get('Destination Latitude', None), errors='coerce')
-        df['Destination Longitude'] = pd.to_numeric(df.get('Destination Longitude', None), errors='coerce')
+        df["Type"] = infer_type_from_filename(path)
+        combined = pd.concat([combined, df], ignore_index=True)
+    
+    return combined
 
-        # Shipment-type-specific processing
-        if shipment_type == 'OTR Bulk':
-            df['LINEHAUL'] = safe_float_conversion(df.get('LINEHAUL', 0))
-            df['FUEL_PCT'] = safe_float_conversion(df.get('FUEL', '0')) / 100
-            df['TOTAL'] = safe_float_conversion(df.get('TOTAL', 0))
-        elif shipment_type in ['Iso Tank Bulk', 'Containers Freight']:
-            df['TOTAL'] = safe_float_conversion(df.get('Total', 0))
-        elif shipment_type == 'LTL & FTL':
-            df['TOTAL'] = safe_float_conversion(df.get('TOTAL', 0))
+def infer_type_from_filename(filename):
+    if "otr" in filename.lower():
+        return "OTR Bulk"
+    elif "rail" in filename.lower():
+        return "Iso Tank Bulk"
+    elif "ocean" in filename.lower():
+        return "Containers Freight"
+    elif "ltl" in filename.lower():
+        return "LTL & FTL"
+    return "Unknown"
 
-        all_dfs.append(df)
+def estimate_freight(df, shipment_type, origin, destination):
+    subset = df[(df["Type"] == shipment_type) & 
+                (df["Origin"] == origin) & 
+                (df["Destination"] == destination)]
 
-    return pd.concat(all_dfs, ignore_index=True)
+    if subset.empty:
+        return "No quote found for this route."
 
-def estimate_freight(df, shipment_type, origin, destination, distance=None):
-    """Estimate the freight cost based on historical averages or fallback if unknown."""
-    filtered = df[
-        (df['Type'] == shipment_type) &
-        (df['ORIGIN'] == origin) &
-        (df['DESTINATION'] == destination)
-    ]
+    avg_total = subset["TOTAL"].mean()
+    return f"Estimated Quote: ${avg_total:,.2f}"
 
-    if not filtered.empty:
-        avg_total = filtered['TOTAL'].mean()
-        return round(avg_total, 2), True
+def create_route_map(origin_coords, destination_coords, shipment_type):
+    m = folium.Map(location=[(origin_coords[0] + destination_coords[0]) / 2,
+                             (origin_coords[1] + destination_coords[1]) / 2],
+                   zoom_start=5)
 
-    # Fallback estimation using $/mile and fuel % average
-    type_subset = df[df['Type'] == shipment_type].copy()
-    type_subset = type_subset[type_subset['LINEHAUL'].notna()]
-    if distance and not type_subset.empty:
-        avg_rate_per_mile = (type_subset['LINEHAUL'] / distance).mean()
-        avg_fuel_pct = type_subset['FUEL_PCT'].mean()
-        est_linehaul = avg_rate_per_mile * distance
-        est_fuel = est_linehaul * avg_fuel_pct
-        estimate = est_linehaul + est_fuel
-        return round(estimate, 2), False
+    color = {
+        "OTR Bulk": "blue",
+        "Iso Tank Bulk": "green",
+        "Containers Freight": "orange",
+        "LTL & FTL": "purple"
+    }.get(shipment_type, "gray")
 
-    return "Cannot Calculate", False
+    folium.Marker(location=origin_coords, popup="Origin", icon=folium.Icon(color="red")).add_to(m)
+    folium.Marker(location=destination_coords, popup="Destination", icon=folium.Icon(color="green")).add_to(m)
 
-def get_coordinates(df, shipment_type, origin, destination):
-    """Get coordinates for the origin and destination."""
-    filtered = df[
-        (df['Type'] == shipment_type) &
-        (df['ORIGIN'] == origin) &
-        (df['DESTINATION'] == destination)
-    ]
-    if filtered.empty:
-        return None, None
+    folium.PolyLine(locations=[origin_coords, destination_coords], color=color, weight=4.5).add_to(m)
 
-    first = filtered.iloc[0]
-    origin_coords = (first['Origin Latitude'], first['Origin Longitude'])
-    dest_coords = (first['Destination Latitude'], first['Destination Longitude'])
-
-    if None in origin_coords or None in dest_coords:
-        return None, None
-
-    return origin_coords, dest_coords
-
-def calculate_distance(origin_coords, dest_coords):
-    """Calculate the geodesic distance between two coordinates."""
-    if origin_coords is None or dest_coords is None:
-        return None
-    return geodesic(origin_coords, dest_coords).miles
+    return m._repr_html_()
