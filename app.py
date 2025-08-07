@@ -1,63 +1,57 @@
-# app.py
 from flask import Flask, render_template, request
 from estimator import get_types, get_origins, get_destinations, calculate_quote
-from geopy.geocoders import Nominatim
-import os
+from utils import geocode_city
 import pandas as pd
-from utils import clean_and_combine_data
+import os
 
 app = Flask(__name__)
-geolocator = Nominatim(user_agent="freight-estimator")
-DATA = clean_and_combine_data()
 
-@app.route("/", methods=["GET", "POST"])
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    result = None
     types = get_types()
+    selected_type = request.form.get('type') or types[0]
+    origins = get_origins(selected_type)
+    destinations = get_destinations(selected_type)
 
-    selected_type = request.form.get("type")
-    selected_origin = request.form.get("origin")
-    selected_dest = request.form.get("destination")
-    dest_city = request.form.get("dest_city")
-    dest_lat = request.form.get("dest_lat")
-    dest_lon = request.form.get("dest_lon")
+    selected_origin = request.form.get('origin')
+    selected_destination = request.form.get('destination')
+    new_destination = request.form.get('new_destination')
 
-    origin_row = None
+    quote = None
+    origin_coords = None
+    dest_coords = None
 
-    # Geocode destination city if entered
-    if dest_city and not dest_lat and not dest_lon:
-        try:
-            location = geolocator.geocode(dest_city)
-            if location:
-                dest_lat = location.latitude
-                dest_lon = location.longitude
-        except:
-            dest_lat = dest_lon = None
+    if selected_origin:
+        df = pd.read_excel(os.path.join('data', f"{selected_type.lower().replace(' ', '_')}.xlsx"))
+        origin_row = df[df['ORIGIN'].str.strip().str.lower() == selected_origin.strip().lower()]
+        if not origin_row.empty:
+            row = origin_row.iloc[0]
+            origin_coords = (row['Origin Latitude'], row['Origin Longitude'])
 
-    origins = get_origins(selected_type) if selected_type else []
-    destinations = get_destinations(selected_type, selected_origin) if selected_origin else []
+    if request.method == 'POST':
+        quote, dest_lat, dest_lon = calculate_quote(
+            selected_type,
+            selected_origin,
+            selected_destination,
+            new_destination
+        )
 
-    if selected_type and selected_origin:
-        df = DATA[(DATA["Type"] == selected_type) & (DATA["Origin"] == selected_origin)]
-        if not df.empty:
-            origin_row = df.iloc[0].to_dict()
+        if dest_lat and dest_lon:
+            dest_coords = (dest_lat, dest_lon)
 
-    if request.method == "POST":
-        result = calculate_quote(selected_type, selected_origin, selected_dest, dest_lat, dest_lon)
+    return render_template(
+        'index.html',
+        types=types,
+        origins=origins,
+        destinations=destinations,
+        selected_type=selected_type,
+        selected_origin=selected_origin,
+        selected_destination=selected_destination,
+        new_destination=new_destination,
+        quote=quote,
+        origin_coords=origin_coords,
+        dest_coords=dest_coords
+    )
 
-    return render_template("index.html",
-                           types=types,
-                           origins=origins,
-                           destinations=destinations,
-                           selected_type=selected_type,
-                           selected_origin=selected_origin,
-                           selected_dest=selected_dest,
-                           dest_city=dest_city,
-                           dest_lat=dest_lat,
-                           dest_lon=dest_lon,
-                           result=result,
-                           origin_row=origin_row)
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    app.run(debug=True)
