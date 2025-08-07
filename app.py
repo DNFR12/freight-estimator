@@ -1,35 +1,68 @@
-from flask import Flask, render_template, request, jsonify
-from estimator import get_types, get_origins, get_destinations, calculate_quote
-from utils import geocode_city
+try:
+    from flask import Flask, render_template, request
+    from estimator import (
+        get_types,
+        get_origins,
+        get_destinations,
+        calculate_quote,
+        get_coordinates,
+        calculate_distance,
+    )
+    import folium
 
-app = Flask(__name__)
+    app = Flask(__name__)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+    @app.route('/')
+    def index():
+        print("✅ Loading index")
+        types = get_types()
+        return render_template('index.html', types=types)
 
-@app.route('/get_origins')
-def get_origin_list():
-    shipment_type = request.args.get('shipment_type')
-    return jsonify(get_origins(shipment_type))
+    @app.route('/get_origins', methods=['POST'])
+    def get_origins_route():
+        shipment_type = request.form['shipment_type']
+        origins = get_origins(shipment_type)
+        return {'origins': origins}
 
-@app.route('/get_destinations')
-def get_destination_list():
-    shipment_type = request.args.get('shipment_type')
-    origin = request.args.get('origin')
-    return jsonify(get_destinations(shipment_type, origin))
+    @app.route('/get_destinations', methods=['POST'])
+    def get_destinations_route():
+        shipment_type = request.form['shipment_type']
+        origin = request.form['origin']
+        destinations = get_destinations(shipment_type, origin)
+        return {'destinations': destinations}
 
-@app.route('/calculate', methods=['POST'])
-def get_estimate():
-    data = request.json
-    shipment_type = data['type']
-    origin = data['origin']
-    destination = data['destination']
-    new_destination = data.get('new_destination')
+    @app.route('/calculate', methods=['POST'])
+    def calculate():
+        shipment_type = request.form['shipment_type']
+        origin = request.form['origin']
+        destination = request.form['destination']
 
-    dest_coords = geocode_city(new_destination) if new_destination else None
-    result = calculate_quote(shipment_type, origin, destination, dest_coords)
-    return jsonify(result)
+        print(f"🔍 Calculating quote for: {shipment_type}, {origin} → {destination}")
 
-if __name__ == '__main__':
-    app.run(debug=True)
+        try:
+            coords = get_coordinates(shipment_type, origin, destination)
+            origin_coords, dest_coords = coords
+
+            distance = calculate_distance(origin_coords, dest_coords)
+            result, direct = calculate_quote(shipment_type, origin, destination, distance)
+
+            return {
+                'quote': result,
+                'direct': direct,
+                'origin_lat': origin_coords[0],
+                'origin_lon': origin_coords[1],
+                'dest_lat': dest_coords[0],
+                'dest_lon': dest_coords[1],
+            }
+
+        except Exception as e:
+            print(f"❌ Error during calculation: {e}")
+            return {'quote': 'Error during calculation', 'direct': False}
+
+    if __name__ == '__main__':
+        print("✅ app.py started successfully")
+        app.run(host='0.0.0.0', port=10000)
+
+except Exception as e:
+    print("❌ Error starting app.py:", e)
+    raise
