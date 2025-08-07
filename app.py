@@ -1,57 +1,35 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 from estimator import get_types, get_origins, get_destinations, calculate_quote
 from utils import geocode_city
-import pandas as pd
-import os
 
 app = Flask(__name__)
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
-    types = get_types()
-    selected_type = request.form.get('type') or types[0]
-    origins = get_origins(selected_type)
-    destinations = get_destinations(selected_type)
+    return render_template('index.html')
 
-    selected_origin = request.form.get('origin')
-    selected_destination = request.form.get('destination')
-    new_destination = request.form.get('new_destination')
+@app.route('/get_origins')
+def get_origin_list():
+    shipment_type = request.args.get('shipment_type')
+    return jsonify(get_origins(shipment_type))
 
-    quote = None
-    origin_coords = None
-    dest_coords = None
+@app.route('/get_destinations')
+def get_destination_list():
+    shipment_type = request.args.get('shipment_type')
+    origin = request.args.get('origin')
+    return jsonify(get_destinations(shipment_type, origin))
 
-    if selected_origin:
-        df = pd.read_excel(os.path.join('data', f"{selected_type.lower().replace(' ', '_')}.xlsx"))
-        origin_row = df[df['ORIGIN'].str.strip().str.lower() == selected_origin.strip().lower()]
-        if not origin_row.empty:
-            row = origin_row.iloc[0]
-            origin_coords = (row['Origin Latitude'], row['Origin Longitude'])
+@app.route('/calculate', methods=['POST'])
+def get_estimate():
+    data = request.json
+    shipment_type = data['type']
+    origin = data['origin']
+    destination = data['destination']
+    new_destination = data.get('new_destination')
 
-    if request.method == 'POST':
-        quote, dest_lat, dest_lon = calculate_quote(
-            selected_type,
-            selected_origin,
-            selected_destination,
-            new_destination
-        )
-
-        if dest_lat and dest_lon:
-            dest_coords = (dest_lat, dest_lon)
-
-    return render_template(
-        'index.html',
-        types=types,
-        origins=origins,
-        destinations=destinations,
-        selected_type=selected_type,
-        selected_origin=selected_origin,
-        selected_destination=selected_destination,
-        new_destination=new_destination,
-        quote=quote,
-        origin_coords=origin_coords,
-        dest_coords=dest_coords
-    )
+    dest_coords = geocode_city(new_destination) if new_destination else None
+    result = calculate_quote(shipment_type, origin, destination, dest_coords)
+    return jsonify(result)
 
 if __name__ == '__main__':
     app.run(debug=True)
