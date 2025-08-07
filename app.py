@@ -1,6 +1,6 @@
-# app.py
 from flask import Flask, render_template, request
 from estimator import get_types, get_origins, get_destinations, calculate_quote
+import os
 
 app = Flask(__name__)
 
@@ -8,6 +8,7 @@ app = Flask(__name__)
 def index():
     result = None
     types = get_types()
+
     selected_type = request.form.get("type")
     selected_origin = request.form.get("origin")
     selected_dest = request.form.get("destination")
@@ -31,6 +32,7 @@ def index():
                            dest_lon=dest_lon,
                            result=result)
 
+# ✅ Render requires binding to 0.0.0.0 and using os.environ["PORT"]
 if __name__ == "__main__":
-    app.run(debug=True)
-
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
