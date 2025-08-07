@@ -2,4 +2,4 @@ flask
 pandas
 geopy
 openpyxl
-
+folium
