@@ -1,98 +1,78 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Freight Estimator</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha512-o9N1jJupUuyjtxetOHaoDuvKyb3MXY2rm2Amur+OpIcuM6A+e3VX5Ib1GqA4qIH4XJK0PfIfLfQtHzW1+XT1Vw=="
-    crossorigin=""
-  />
-  <style>
-    #map { height: 300px; margin-top: 1rem; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Freight Estimator</title>
+    <link rel="stylesheet" href="/static/style.css">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-sA+zNcdN2F5SEt03/f0N1TqJhCLRX+tFZLkTTVd6ER0=" crossorigin="" />
 </head>
 <body>
-<div class="container">
-  <h1>Freight Estimator</h1>
+    <div class="container">
+        <h1>Freight Estimator</h1>
+        <form method="post">
+            <label>Type:</label>
+            <select name="type" onchange="this.form.submit()">
+                {% for t in types %}
+                <option value="{{ t }}" {% if t == selected_type %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+            </select>
 
-  <form method="post">
-    <label>Type:</label>
-    <select name="type" onchange="this.form.submit()">
-      <option value="">-- Select --</option>
-      {% for t in types %}
-        <option value="{{ t }}" {% if t == selected_type %}selected{% endif %}>{{ t }}</option>
-      {% endfor %}
-    </select>
+            <label>Origin:</label>
+            <select name="origin">
+                {% for o in origins %}
+                <option value="{{ o }}" {% if o == selected_origin %}selected{% endif %}>{{ o }}</option>
+                {% endfor %}
+            </select>
 
-    <label>Origin:</label>
-    <select name="origin" onchange="this.form.submit()">
-      <option value="">-- Select --</option>
-      {% for o in origins %}
-        <option value="{{ o }}" {% if o == selected_origin %}selected{% endif %}>{{ o }}</option>
-      {% endfor %}
-    </select>
+            <label>Destination (Quoted Lane):</label>
+            <select name="destination">
+                <option value="">-- Select --</option>
+                {% for d in destinations %}
+                <option value="{{ d }}" {% if d == selected_destination %}selected{% endif %}>{{ d }}</option>
+                {% endfor %}
+            </select>
 
-    <label>Destination (Quoted Lane):</label>
-    <select name="destination">
-      <option value="">-- Select --</option>
-      {% for d in destinations %}
-        <option value="{{ d }}" {% if d == selected_dest %}selected{% endif %}>{{ d }}</option>
-      {% endfor %}
-    </select>
+            <label>Or enter a new destination city:</label>
+            <input type="text" name="new_destination" placeholder="e.g., Austin, TX" value="{{ new_destination or '' }}">
 
-    <label>Or enter a new destination city:</label>
-    <input type="text" name="dest_city" value="{{ dest_city or '' }}" placeholder="e.g., Austin, TX">
+            <button type="submit">Estimate</button>
+        </form>
 
-    <button type="submit">Estimate</button>
-  </form>
+        {% if quote %}
+        <div class="quote-box">
+            <h2>Quoted</h2>
+            <p><strong>Total:</strong> ${{ "{:,.2f}".format(quote) }}</p>
+        </div>
+        {% endif %}
 
-  {% if result %}
-    <div class="result">
-      <h2>{{ result.status }}</h2>
-      {% if result.total %}
-        <p><strong>Total:</strong> ${{ result.total }}</p>
-      {% endif %}
-      {% if result.distance %}
-        <p><strong>Distance:</strong> {{ result.distance }} miles</p>
-      {% endif %}
+        {% if origin_coords and dest_coords %}
+        <div id="map" style="height: 400px; margin-top: 20px;"></div>
+        {% endif %}
     </div>
-  {% endif %}
 
-  {% if selected_origin and (dest_lat and dest_lon) %}
-    <div id="map"></div>
-  {% endif %}
-</div>
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-Cg+9sZrgFtDJhrx6FeA+uVcyWvhQktEfJGhRkFlbRuM=" crossorigin=""></script>
 
-<script
-  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-  integrity="sha512-qUu5k2ITkkHSToIAmGZ+Z3nUDrVR6H1uk9xib7LVIf2QucUJz+z2O+kVCd1tLmdkZ+aIQNYYlOrOA2+ykZg8Eg=="
-  crossorigin=""
-></script>
+    {% if origin_coords and dest_coords %}
+    <script>
+        const origin = {{ origin_coords|tojson }};
+        const destination = {{ dest_coords|tojson }};
 
-<script>
-  {% if selected_origin and (dest_lat and dest_lon) %}
-    const originCoords = [{{ origin_row['Origin Latitude'] }}, {{ origin_row['Origin Longitude'] }}];
-    const destCoords = [{{ dest_lat }}, {{ dest_lon }}];
+        const map = L.map('map').setView(origin, 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: 'Map data © <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'
+        }).addTo(map);
 
-    const map = L.map('map').setView(originCoords, 5);
+        const originMarker = L.marker(origin).addTo(map).bindPopup("Origin").openPopup();
+        const destMarker = L.marker(destination).addTo(map).bindPopup("Destination");
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
-
-    L.marker(originCoords).addTo(map).bindPopup("Origin").openPopup();
-    L.marker(destCoords).addTo(map).bindPopup("Destination");
-
-    L.polyline([originCoords, destCoords], {
-      color: "{{ 'blue' if selected_type in ['OTR Bulk', 'LTL & FTL'] else 'green' if selected_type == 'Iso Tank Bulk' else 'navy' }}",
-      weight: 4,
-      opacity: 0.7
-    }).addTo(map);
-  {% endif %}
-</script>
+        const route = L.polyline([origin, destination], { color: 'blue' }).addTo(map);
+        map.fitBounds(route.getBounds());
+    </script>
+    {% endif %}
 </body>
 </html>
