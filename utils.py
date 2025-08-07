@@ -1,81 +1,82 @@
 import pandas as pd
+import numpy as np
 from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut
+from geopy.distance import geodesic
 
-# Helper for safe geocoding
-def geocode_city(city_name):
-    geolocator = Nominatim(user_agent="freight-estimator")
+geolocator = Nominatim(user_agent="freight_estimator")
+
+def geocode_city(city):
     try:
-        location = geolocator.geocode(city_name)
-        if location:
-            return (location.latitude, location.longitude)
-    except GeocoderTimedOut:
+        loc = geolocator.geocode(city)
+        return (loc.latitude, loc.longitude) if loc else None
+    except:
         return None
-    return None
 
-# Clean & normalize each quote file
-def load_and_clean(file_path, mode):
-    df = pd.read_excel(file_path)
+def compute_distance(origin_coords, dest_coords, shipment_type):
+    base_distance = geodesic(origin_coords, dest_coords).miles
+    if shipment_type == 'Iso Tank Bulk':
+        return base_distance * 1.3  # Rail multiplier
+    elif shipment_type == 'Containers Freight':
+        return base_distance * 1.1  # Ship multiplier
+    else:
+        return base_distance  # Road is most direct
 
-    # Normalize column names
-    df.columns = [c.strip().lower() for c in df.columns]
-
-    # Rename common fields
-    df = df.rename(columns={
-        'origin': 'origin',
-        'destination': 'destination',
-        'linehaul': 'linehaul',
-        'fuel': 'fuel',
-        'total': 'total'
-    })
-
-    # Clean currency columns
-    for col in ['linehaul', 'total']:
-        if col in df.columns:
-            df[col] = df[col].replace(r'[\$,]', '', regex=True).astype(float)
-
-    # Fuel as percentage (e.g., "25%" → 0.25)
-    if 'fuel' in df.columns:
-        df['fuel'] = df['fuel'].astype(str).str.replace('%', '').astype(float) / 100
-
-    # Add distance if not present
-    if 'distance' not in df.columns and 'origin latitude' in df.columns and 'origin longitude' in df.columns:
-        df['origin latitude'] = pd.to_numeric(df['origin latitude'], errors='coerce')
-        df['origin longitude'] = pd.to_numeric(df['origin longitude'], errors='coerce')
-        df['destination latitude'] = pd.to_numeric(df['destination latitude'], errors='coerce')
-        df['destination longitude'] = pd.to_numeric(df['destination longitude'], errors='coerce')
-        df['distance'] = df.apply(lambda row: (
-            ((row['origin latitude'] - row['destination latitude']) ** 2 + 
-             (row['origin longitude'] - row['destination longitude']) ** 2) ** 0.5
-        ) * 69, axis=1)  # rough miles per degree
-
-    df['mode'] = mode
+def clean_currency_column(df, column):
+    df[column] = df[column].replace('[\$,]', '', regex=True).astype(float)
     return df
 
-# Combine all mode files
-def combine_all_datasets(file_paths_by_mode):
+def combine_all_datasets(file_paths):
     all_dfs = []
-    for mode, path in file_paths_by_mode.items():
-        df = load_and_clean(path, mode)
+    for shipment_type, path in file_paths.items():
+        df = pd.read_excel(path)
+        df = df.rename(columns=lambda x: x.strip())
+        df['Type'] = shipment_type
+
+        if shipment_type == 'OTR Bulk':
+            df = clean_currency_column(df, 'LINEHAUL')
+            df = clean_currency_column(df, 'TOTAL')
+            df['FUEL_PCT'] = df['FUEL'].str.replace('%', '').astype(float) / 100
+        elif shipment_type == 'LTL & FTL':
+            df = clean_currency_column(df, 'TOTAL')
+        elif shipment_type == 'Iso Tank Bulk':
+            df = clean_currency_column(df, 'Total')
+            df = df.rename(columns={'Total': 'TOTAL'})
+        elif shipment_type == 'Containers Freight':
+            df = clean_currency_column(df, 'Total')
+            df = df.rename(columns={'Total': 'TOTAL'})
+
+        # Normalize column names
+        df['ORIGIN'] = df['Origin'] if 'Origin' in df.columns else df['ORIGIN']
+        df['DESTINATION'] = df['Designation'] if 'Designation' in df.columns else df['DESTINATION']
+        df['Origin Latitude'] = df['Origin Latitude'].astype(float)
+        df['Origin Longitude'] = df['Origin Longitude'].astype(float)
+
         all_dfs.append(df)
+
     return pd.concat(all_dfs, ignore_index=True)
 
-# Estimate $/mile and fuel from all quotes
-def get_average_metrics(df, mode):
-    df_mode = df[df['mode'] == mode]
-    if df_mode.empty:
-        return None, None
-    df_mode = df_mode[df_mode['distance'] > 0]
-    df_mode['dollar_per_mile'] = df_mode['linehaul'] / df_mode['distance']
-    avg_rate = df_mode['dollar_per_mile'].mean()
-    avg_fuel_pct = df_mode['fuel'].mean()
-    return avg_rate, avg_fuel_pct
+def find_matching_routes(df):
+    if df.empty:
+        return {'total': 'Cannot Calculate'}
 
-# Optional legacy support
-def clean_and_combine_data(file_paths):
-    all_dfs = []
-    for file in file_paths:
-        df = pd.read_excel(file)
-        df.columns = [col.lower().strip() for col in df.columns]
-        all_dfs.append(df)
-    return pd.concat(all_dfs, ignore_index=True)
+    avg = df['TOTAL'].mean()
+    return {
+        'total': round(avg, 2)
+    }
+
+def calculate_estimate(df, miles):
+    df = df[df['LINEHAUL'] > 0] if 'LINEHAUL' in df.columns else df
+    df = df[df['TOTAL'] > 0]
+
+    avg_linehaul_per_mile = df['LINEHAUL'].div(miles).mean() if 'LINEHAUL' in df.columns else df['TOTAL'].div(miles).mean()
+    avg_fuel_pct = df['FUEL_PCT'].mean() if 'FUEL_PCT' in df.columns else 0.2  # fallback
+
+    linehaul = avg_linehaul_per_mile * miles
+    fuel = linehaul * avg_fuel_pct
+    total = linehaul + fuel
+
+    return {
+        'linehaul': round(linehaul, 2),
+        'fuel': round(fuel, 2),
+        'total': round(total, 2)
+    }
